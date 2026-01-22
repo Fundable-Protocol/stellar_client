@@ -3,7 +3,7 @@ use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Ve
 
 /// Stream status enum
 #[contracttype]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum StreamStatus {
     Active,
     Paused,

@@ -99,14 +99,6 @@ TypeScript SDK for interacting with the deployed contracts.
 - [evm_client](https://github.com/Fundable-Protocol/evm_client) - EVM client
 - [backend-main](https://github.com/Fundable-Protocol/backend-main) - Backend API
 
-## Workflow badges
-- ![Contracts CI](https://github.com/Fundable-Protocol/stellar_client/actions/workflows/contracts.yml/badge.svg)
-
-- ![Frontend CI](https://github.com/Fundable-Protocol/stellar_client/actions/workflows/frontend.yml/badge.svg)
-
-- ![Testnet Deploy](https://github.com/Fundable-Protocol/stellar_client/actions/workflows/deploy-testnet.yml/badge.svg)
-
-
 ## 📄 License
 
 MIT License - see [LICENSE](LICENSE) for details.
