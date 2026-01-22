@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { StellarWalletProvider } from "../providers/StellarWalletProvider";
+import { Navbar } from "./components/navbar";
+import { WalletModal } from "./components/wallet-modal";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -23,11 +26,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <StellarWalletProvider>
+          <Navbar />
+          <main className="">{children}</main>
+          <WalletModal />
+        </StellarWalletProvider>
       </body>
     </html>
   );
