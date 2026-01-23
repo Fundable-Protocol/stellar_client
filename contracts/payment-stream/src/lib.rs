@@ -7,7 +7,7 @@ use soroban_sdk::{
 
 /// Stream status enum
 #[contracttype]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StreamStatus {
     Active,
     Paused,
@@ -107,7 +107,7 @@ impl PaymentStreamContract {
             status: StreamStatus::Active,
         };
 
-        // Store stream and bump TTL
+        // Store stream and extend TTL
         env.storage().persistent().set(&stream_id, &stream);
         env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
 
@@ -123,7 +123,7 @@ impl PaymentStreamContract {
         if !env.storage().persistent().has(&stream_id) {
             return None;
         }
-        // Bump TTL on read for safety
+        // Extend TTL on read for safety
         env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
         env.storage().persistent().get(&stream_id)
     }
@@ -256,7 +256,10 @@ impl PaymentStreamContract {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke}, IntoVal};
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
+        IntoVal, token,
+    };
 
     #[test]
     fn test_create_stream() {
@@ -266,9 +269,11 @@ mod test {
         let admin = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = Address::generate(&env);
-        let token = env.register_stellar_asset_contract(admin.clone());
 
-        let contract_id = env.register_contract(None, PaymentStreamContract);
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract);
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
         client.initialize(&admin);
@@ -305,9 +310,11 @@ mod test {
         let admin = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = Address::generate(&env);
-        let token = env.register_stellar_asset_contract(admin.clone());
 
-        let contract_id = env.register_contract(None, PaymentStreamContract);
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract);
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
         client.initialize(&admin);
@@ -340,9 +347,11 @@ mod test {
         let admin = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = Address::generate(&env);
-        let token = env.register_stellar_asset_contract(admin.clone());
 
-        let contract_id = env.register_contract(None, PaymentStreamContract);
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract);
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
         client.initialize(&admin);
@@ -380,9 +389,11 @@ mod test {
         let admin = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = Address::generate(&env);
-        let token = env.register_stellar_asset_contract(admin.clone());
 
-        let contract_id = env.register_contract(None, PaymentStreamContract);
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract);
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
         client.initialize(&admin);
@@ -420,9 +431,11 @@ mod test {
         let admin = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = Address::generate(&env);
-        let token = env.register_stellar_asset_contract(admin.clone());
 
-        let contract_id = env.register_contract(None, PaymentStreamContract);
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract);
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
         client.initialize(&admin);
@@ -461,7 +474,7 @@ mod test {
 
         let admin = Address::generate(&env);
 
-        let contract_id = env.register_contract(None, PaymentStreamContract);
+        let contract_id = env.register(PaymentStreamContract);
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
         client.initialize(&admin);
@@ -477,9 +490,11 @@ mod test {
         let admin = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = Address::generate(&env);
-        let token = env.register_stellar_asset_contract(admin.clone());
 
-        let contract_id = env.register_contract(None, PaymentStreamContract);
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract);
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
         // Mock auth only for init and create
@@ -506,7 +521,7 @@ mod test {
 
         client.initialize(&admin);
 
-        // Mint tokens to sender (mocked)
+        // Mint tokens to sender
         let token_admin = token::StellarAssetClient::new(&env, &token);
         token_admin.mint(&sender, &1000);
 
