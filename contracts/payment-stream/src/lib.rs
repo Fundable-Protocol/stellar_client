@@ -17,7 +17,7 @@ pub enum StreamStatus {
 
 /// Stream data structure
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Stream {
     pub id: u64,
     pub sender: Address,
