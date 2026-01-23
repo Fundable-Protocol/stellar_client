@@ -18,9 +18,13 @@ export function WalletModal() {
     if (isModalOpen) setActiveSelection(null);
   }, [isModalOpen]);
 
-  const handleConnectClick = () => {
+  const handleConnectClick = async () => {
     if (activeSelection) {
-      connect(activeSelection);
+      try {
+        await connect(activeSelection);
+      } catch (error) {
+        console.error("Connection attempt failed:", error);
+      }
     }
   };
 

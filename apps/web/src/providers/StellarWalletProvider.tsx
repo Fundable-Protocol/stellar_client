@@ -57,7 +57,7 @@ export const StellarWalletProvider = ({
   const [kit, setKit] = useState<StellarWalletsKit | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Initialize kit
+  // Initialize kit and handle persistence
   useEffect(() => {
     const walletKit = new StellarWalletsKit({
       network: network,
@@ -66,23 +66,31 @@ export const StellarWalletProvider = ({
     });
     setKit(walletKit);
 
-    // Persistence
+    // Only restore on initial load if network hasn't changed from saved state
+    // (Assuming we might want to save network in future, for now we just clear on switch)
     const savedAddress = localStorage.getItem("stellar_wallet_address");
     const savedWalletId = localStorage.getItem("stellar_wallet_id");
+    const savedNetwork = localStorage.getItem("stellar_wallet_network");
 
-    if (savedAddress && savedWalletId) {
+    if (savedAddress && savedWalletId && savedNetwork === network) {
       setAddress(savedAddress);
       setSelectedWalletId(savedWalletId);
       walletKit.setWallet(savedWalletId);
     }
   }, [network]);
 
+  const disconnect = useCallback(async () => {
+    setAddress(null);
+    setSelectedWalletId(null);
+    localStorage.removeItem("stellar_wallet_address");
+    localStorage.removeItem("stellar_wallet_id");
+    localStorage.removeItem("stellar_wallet_network");
+  }, []);
+
   const setNetwork = (newNetwork: WalletNetwork) => {
-    setNetworkState(newNetwork);
-    // When network changes, we might want to trigger a reconnect or just update the kit
-    if (kit) {
-      // The kit needs to be re-initialized or updated if network changes
-      // In this impl, the useEffect handles re-init on network change
+    if (newNetwork !== network) {
+      disconnect();
+      setNetworkState(newNetwork);
     }
   };
 
@@ -105,6 +113,7 @@ export const StellarWalletProvider = ({
       setSelectedWalletId(walletId);
       localStorage.setItem("stellar_wallet_address", address);
       localStorage.setItem("stellar_wallet_id", walletId);
+      localStorage.setItem("stellar_wallet_network", network);
       setIsModalOpen(false);
     } catch (error: unknown) {
       const errorMessage =
@@ -120,13 +129,6 @@ export const StellarWalletProvider = ({
     } finally {
       setIsConnecting(false);
     }
-  };
-
-  const disconnect = async () => {
-    setAddress(null);
-    setSelectedWalletId(null);
-    localStorage.removeItem("stellar_wallet_address");
-    localStorage.removeItem("stellar_wallet_id");
   };
 
   const signTransaction = useCallback(
