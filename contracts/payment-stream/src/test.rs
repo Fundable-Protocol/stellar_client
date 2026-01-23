@@ -235,26 +235,35 @@ fn test_get_nonexistent_stream() {
         let contract_id = env.register(PaymentStreamContract, ());
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
-        env.mock_auths(&[
-            MockAuth {
-                address: &admin,
-                invoke: &MockAuthInvoke {
-                    contract: &contract_id,
-                    fn_name: "initialize",
-                    args: (&admin,).into_val(&env),
+       env.mock_auths(&[
+    MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "initialize",
+            args: (&admin,).into_val(&env),
+            sub_invokes: &[],
+        },
+    },
+    MockAuth {
+        address: &sender,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "create_stream",
+            args: (&sender, &recipient, &token, 1000i128, 0u64, 100u64).into_val(&env),
+            sub_invokes: &[
+                // ← This is the critical line you were missing
+                MockAuthInvoke {
+                    contract: &token,
+                    fn_name: "transfer",
+                    args: (&sender, &contract_id, 1000i128).into_val(&env),
                     sub_invokes: &[],
                 },
-            },
-            MockAuth {
-                address: &sender,
-                invoke: &MockAuthInvoke {
-                    contract: &contract_id,
-                    fn_name: "create_stream",
-                    args: (&sender, &recipient, &token, 1000i128, 0u64, 100u64).into_val(&env),
-                    sub_invokes: &[],
-                },
-            },
-        ]);
+            ],
+        },
+    },
+    
+]);
 
         client.initialize(&admin);
 
