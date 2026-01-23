@@ -7,16 +7,16 @@ This document outlines the steps required to set up your local development envir
 Before you begin, ensure you have the following installed:
 
 -   **Node.js**: Version 18 or higher.
-    -   Verify with: `node -v`
+    -   `node -v`
 -   **pnpm**: Version 8 or higher. This project uses `pnpm` for package management.
-    -   Verify with: `pnpm -v`
+    -   `pnpm -v`
     -   If not installed, install with: `npm install -g pnpm`
 -   **Rust**: For compiling the Soroban smart contracts.
     -   Install `rustup` by following instructions on [rustup.rs](https://rustup.rs/).
-    -   Verify with: `rustc --version`
+    -   `rustc --version`
 -   **Soroban CLI**: Essential for interacting with Soroban smart contracts (e.g., building, testing, deploying).
     -   Follow the installation guide on the official Soroban documentation: [Soroban CLI Setup](https://soroban.stellar.org/docs/getting-started/setup)
-    -   Verify with: `soroban version`
+    -   `soroban version`
 
 ## Getting Started
 
