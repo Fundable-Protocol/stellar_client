@@ -50,7 +50,7 @@ export function WalletModal() {
             className="relative w-full max-w-md overflow-hidden rounded-3xl border border-white/10 bg-[#0F1621] p-1 shadow-2xl"
           >
             {/* Glossy overlay effect */}
-            <div className="absolute inset-0 bg-linear-to-br from-white/5 to-transparent pointer-events-none" />
+            <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
 
             <div className="relative bg-[#0F1621] rounded-[22px] p-8 flex flex-col">
               {/* Header */}
@@ -103,15 +103,21 @@ export function WalletModal() {
 
                       {/* Icon */}
                       <div
-                        className={`p-2 rounded-xl transition-colors ${isSelected ? "bg-white/20" : "bg-white/5"}`}
+                        className={`p-2 rounded-xl transition-colors ${
+                          isSelected ? "bg-white/20" : "bg-white/5"
+                        }`}
                       >
                         <Wallet
-                          className={`w-5 h-5 ${isSelected ? "text-white" : "text-[#92A5A8]"}`}
+                          className={`w-5 h-5 ${
+                            isSelected ? "text-white" : "text-[#92A5A8]"
+                          }`}
                         />
                       </div>
 
                       <span
-                        className={`font-semibold text-sm tracking-wide ${isSelected ? "text-white" : "text-[#92A5A8]"}`}
+                        className={`font-semibold text-sm tracking-wide ${
+                          isSelected ? "text-white" : "text-[#92A5A8]"
+                        }`}
                       >
                         {wallet.name}
                       </span>
