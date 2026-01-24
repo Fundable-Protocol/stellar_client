@@ -10,6 +10,7 @@ mod test {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = Address::generate(&env);
 
@@ -19,7 +20,7 @@ mod test {
         let contract_id = env.register(PaymentStreamContract, ());
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
-        client.initialize(&admin);
+        client.initialize(&admin, &fee_collector, &0);
 
         // Mint tokens to sender
         let token_admin = token::StellarAssetClient::new(&env, &token);
@@ -51,6 +52,7 @@ mod test {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = Address::generate(&env);
 
@@ -60,7 +62,7 @@ mod test {
         let contract_id = env.register(PaymentStreamContract, ());
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
-        client.initialize(&admin);
+        client.initialize(&admin, &fee_collector, &0);
 
         let token_admin = token::StellarAssetClient::new(&env, &token);
         token_admin.mint(&sender, &1000);
@@ -85,6 +87,7 @@ mod test {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = Address::generate(&env);
 
@@ -94,7 +97,7 @@ mod test {
         let contract_id = env.register(PaymentStreamContract, ());
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
-        client.initialize(&admin);
+        client.initialize(&admin, &fee_collector, &0);
 
         let token_admin = token::StellarAssetClient::new(&env, &token);
         token_admin.mint(&sender, &1000);
@@ -126,6 +129,7 @@ mod test {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = Address::generate(&env);
 
@@ -135,7 +139,7 @@ mod test {
         let contract_id = env.register(PaymentStreamContract, ());
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
-        client.initialize(&admin);
+        client.initialize(&admin, &fee_collector, &0);
 
         let token_admin = token::StellarAssetClient::new(&env, &token);
         token_admin.mint(&sender, &1000);
@@ -167,6 +171,7 @@ mod test {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = Address::generate(&env);
 
@@ -176,7 +181,7 @@ mod test {
         let contract_id = env.register(PaymentStreamContract, ());
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
-        client.initialize(&admin);
+        client.initialize(&admin, &fee_collector, &0);
 
         let token_admin = token::StellarAssetClient::new(&env, &token);
         token_admin.mint(&sender, &1000);
@@ -210,10 +215,11 @@ mod test {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
         let contract_id = env.register(PaymentStreamContract, ());
         let client = PaymentStreamContractClient::new(&env, &contract_id);
 
-        client.initialize(&admin);
+        client.initialize(&admin, &fee_collector, &0);
         client.get_stream(&999);
     }
 
@@ -223,6 +229,7 @@ mod test {
         let env = Env::default();
 
         let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = Address::generate(&env);
 
@@ -238,7 +245,7 @@ mod test {
                 invoke: &MockAuthInvoke {
                     contract: &contract_id,
                     fn_name: "initialize",
-                    args: (&admin,).into_val(&env),
+                    args: (&admin, &fee_collector, &0u32).into_val(&env),
                     sub_invokes: &[],
                 },
             },
@@ -267,7 +274,8 @@ mod test {
             },
         ]);
 
-        client.initialize(&admin);
+        let fee_collector = Address::generate(&env);
+        client.initialize(&admin, &fee_collector, &0);
 
         let token_admin = token::StellarAssetClient::new(&env, &token);
         token_admin.mint(&sender, &1000);
@@ -302,7 +310,8 @@ fn test_pause_and_resume_stream() {
     let contract_id = env.register(PaymentStreamContract, ());
     let client = PaymentStreamContractClient::new(&env, &contract_id);
 
-    client.initialize(&admin);
+    let fee_collector = Address::generate(&env);
+    client.initialize(&admin, &fee_collector, &0);
 
     let token_admin = token::StellarAssetClient::new(&env, &token);
     token_admin.mint(&sender, &1000);
