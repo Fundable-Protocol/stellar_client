@@ -17,10 +17,20 @@ stellar_client/
 │   ├── distributor/         # Token distribution contract
 │   └── Cargo.toml           # Rust workspace config
 │
-├── packages/
-│   └── sdk/                 # TypeScript SDK for contract interaction
+├── docs/                      # Project documentation
+│   ├── architecture.md
+│   ├── getting-started.md     # Project setup documentation
+│   ├── contracts/             # Contracts documentation
+│   │   ├── distributor.md
+│   │   └── payment-stream.md
+│   └── frontend/              # Frontend documentation
+│       └── components.md
+├── packages/                  # Monorepo packages
+│   └── sdk/                   # TypeScript SDK for contract interaction
 │
 └── package.json             # Root workspace config
+
+
 ```
 
 ## 🌟 Features
