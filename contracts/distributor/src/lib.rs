@@ -17,9 +17,9 @@ impl DistributorContract {
     /// Distribute equal amounts to multiple recipients
     /// Total amount is divided equally among all recipients
     pub fn distribute_equal(
-        env: Env,
+        _env: Env,
         sender: Address,
-        token: Address,
+        _token: Address,
         total_amount: i128,
         recipients: Vec<Address>,
     ) {
@@ -42,9 +42,9 @@ impl DistributorContract {
     /// Distribute weighted amounts to multiple recipients
     /// Each recipient receives their specified amount
     pub fn distribute_weighted(
-        env: Env,
+        _env: Env,
         sender: Address,
-        token: Address,
+        _token: Address,
         recipients: Vec<Address>,
         amounts: Vec<i128>,
     ) {
@@ -54,7 +54,7 @@ impl DistributorContract {
             recipients.len() == amounts.len(),
             "Recipients and amounts must match"
         );
-        assert!(recipients.len() > 0, "No recipients provided");
+        assert!(!recipients.is_empty(), "No recipients provided");
 
         // TODO: Transfer tokens from sender to each recipient with their specified amount
         for i in 0..recipients.len() {

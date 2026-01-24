@@ -1,6 +1,6 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, Env, String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, token, Address, Env, Symbol,
 };
 
 #[contracterror]
@@ -14,7 +14,7 @@ pub enum Error {
     StreamNotFound = 5,
     StreamNotActive = 6,
     StreamNotTransferable = 7,
-    NFTNotFound = 8,
+    OwnershipRecordNotFound = 8,
     NoTokensToClaim = 9,
     Unauthorized = 10,
 }
@@ -41,12 +41,12 @@ pub struct Stream {
     pub end_time: u64,
     pub status: StreamStatus,
     pub transferable: bool,
-    pub nft_id: u64,
+    pub ownership_id: u64,
 }
 
 #[contracttype]
 #[derive(Clone, Debug)]
-pub struct StreamNFT {
+pub struct StreamOwnershipRecord {
     pub stream_id: u64,
     pub owner: Address,
     pub minted_at: u64,
@@ -56,13 +56,11 @@ pub struct StreamNFT {
 #[contracttype]
 pub enum DataKey {
     StreamCounter,
-    NFTCounter,
+    OwnershipCounter,
     Stream(u64),
-    StreamNFT(u64),
-    NFTToStream(u64),
+    StreamOwnershipRecord(u64),
+    OwnershipToStream(u64),
     Admin,
-    NFTName,
-    NFTSymbol,
 }
 
 #[contracttype]
@@ -76,14 +74,14 @@ pub struct StreamCreatedEvent {
     pub start_time: u64,
     pub end_time: u64,
     pub transferable: bool,
-    pub nft_id: u64,
+    pub ownership_id: u64,
 }
 
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct StreamTransferredEvent {
     pub stream_id: u64,
-    pub nft_id: u64,
+    pub ownership_id: u64,
     pub from: Address,
     pub to: Address,
     pub timestamp: u64,
@@ -104,6 +102,7 @@ pub struct StreamCancelledEvent {
     pub stream_id: u64,
     pub sender: Address,
     pub refund_amount: i128,
+    pub vested_amount: i128,
     pub timestamp: u64,
 }
 
@@ -115,24 +114,21 @@ impl PaymentStreamContract {
     pub fn initialize(
         env: Env,
         admin: Address,
-        nft_name: String,
-        nft_symbol: String,
     ) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::AlreadyInitialized);
         }
 
+        admin.require_auth();
+
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::NFTName, &nft_name);
-        env.storage()
-            .instance()
-            .set(&DataKey::NFTSymbol, &nft_symbol);
         env.storage().instance().set(&DataKey::StreamCounter, &0u64);
-        env.storage().instance().set(&DataKey::NFTCounter, &0u64);
+        env.storage().instance().set(&DataKey::OwnershipCounter, &0u64);
 
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_stream(
         env: Env,
         sender: Address,
@@ -168,7 +164,7 @@ impl PaymentStreamContract {
             .instance()
             .set(&DataKey::StreamCounter, &new_stream_id);
 
-        let nft_id = Self::mint_nft(env.clone(), recipient.clone(), new_stream_id);
+        let ownership_id = Self::mint_ownership_record(env.clone(), recipient.clone(), new_stream_id);
 
         let stream = Stream {
             id: new_stream_id,
@@ -181,7 +177,7 @@ impl PaymentStreamContract {
             end_time,
             status: StreamStatus::Active,
             transferable,
-            nft_id,
+            ownership_id,
         };
 
         env.storage()
@@ -199,7 +195,7 @@ impl PaymentStreamContract {
                 start_time,
                 end_time,
                 transferable,
-                nft_id,
+                ownership_id,
             },
         );
 
@@ -221,14 +217,14 @@ impl PaymentStreamContract {
             return Err(Error::StreamNotTransferable);
         }
 
-        let nft_id = stream.nft_id;
-        let mut nft: StreamNFT = env
+        let ownership_id = stream.ownership_id;
+        let mut ownership_record: StreamOwnershipRecord = env
             .storage()
             .persistent()
-            .get(&DataKey::StreamNFT(nft_id))
-            .ok_or(Error::NFTNotFound)?;
+            .get(&DataKey::StreamOwnershipRecord(ownership_id))
+            .ok_or(Error::OwnershipRecordNotFound)?;
 
-        nft.owner.require_auth();
+        ownership_record.owner.require_auth();
 
         let old_recipient = stream.recipient.clone();
 
@@ -237,16 +233,16 @@ impl PaymentStreamContract {
             .persistent()
             .set(&DataKey::Stream(stream_id), &stream);
 
-        nft.owner = new_recipient.clone();
+        ownership_record.owner = new_recipient.clone();
         env.storage()
             .persistent()
-            .set(&DataKey::StreamNFT(nft_id), &nft);
+            .set(&DataKey::StreamOwnershipRecord(ownership_id), &ownership_record);
 
         env.events().publish(
             (Symbol::new(&env, "stream_transferred"),),
             StreamTransferredEvent {
                 stream_id,
-                nft_id,
+                ownership_id,
                 from: old_recipient,
                 to: new_recipient,
                 timestamp: env.ledger().timestamp(),
@@ -267,13 +263,13 @@ impl PaymentStreamContract {
             return Err(Error::StreamNotActive);
         }
 
-        let nft: StreamNFT = env
+        let ownership_record: StreamOwnershipRecord = env
             .storage()
             .persistent()
-            .get(&DataKey::StreamNFT(stream.nft_id))
-            .ok_or(Error::NFTNotFound)?;
+            .get(&DataKey::StreamOwnershipRecord(stream.ownership_id))
+            .ok_or(Error::OwnershipRecordNotFound)?;
 
-        nft.owner.require_auth();
+        ownership_record.owner.require_auth();
 
         let current_time = env.ledger().timestamp();
         let claimable = Self::calculate_claimable(&stream, current_time);
@@ -293,13 +289,13 @@ impl PaymentStreamContract {
             .set(&DataKey::Stream(stream_id), &stream);
 
         let token_client = token::Client::new(&env, &stream.token);
-        token_client.transfer(&env.current_contract_address(), &nft.owner, &claimable);
+        token_client.transfer(&env.current_contract_address(), &ownership_record.owner, &claimable);
 
         env.events().publish(
             (Symbol::new(&env, "stream_claimed"),),
             StreamClaimedEvent {
                 stream_id,
-                recipient: nft.owner,
+                recipient: ownership_record.owner,
                 amount: claimable,
                 timestamp: current_time,
             },
@@ -321,9 +317,29 @@ impl PaymentStreamContract {
 
         stream.sender.require_auth();
 
+        let ownership_id: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OwnershipToStream(stream_id))
+            .ok_or(Error::OwnershipRecordNotFound)?;
+        let ownership_record: StreamOwnershipRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::StreamOwnershipRecord(ownership_id))
+            .ok_or(Error::OwnershipRecordNotFound)?;
+
         let current_time = env.ledger().timestamp();
         let vested = Self::calculate_vested(&stream, current_time);
         let refund_amount = stream.total_amount - vested;
+
+        if vested > 0 {
+            let token_client = token::Client::new(&env, &stream.token);
+            token_client.transfer(
+                &env.current_contract_address(),
+                &ownership_record.owner,
+                &vested,
+            );
+        }
 
         stream.status = StreamStatus::Canceled;
         env.storage()
@@ -345,6 +361,7 @@ impl PaymentStreamContract {
                 stream_id,
                 sender: stream.sender,
                 refund_amount,
+                vested_amount: vested,
                 timestamp: current_time,
             },
         );
@@ -359,20 +376,20 @@ impl PaymentStreamContract {
             .ok_or(Error::StreamNotFound)
     }
 
-    pub fn get_nft(env: Env, nft_id: u64) -> Result<StreamNFT, Error> {
+    pub fn get_ownership_record(env: Env, ownership_id: u64) -> Result<StreamOwnershipRecord, Error> {
         env.storage()
             .persistent()
-            .get(&DataKey::StreamNFT(nft_id))
-            .ok_or(Error::NFTNotFound)
+            .get(&DataKey::StreamOwnershipRecord(ownership_id))
+            .ok_or(Error::OwnershipRecordNotFound)
     }
 
-    pub fn nft_owner(env: Env, nft_id: u64) -> Result<Address, Error> {
-        let nft: StreamNFT = env
+    pub fn ownership_record_owner(env: Env, ownership_id: u64) -> Result<Address, Error> {
+        let ownership_record: StreamOwnershipRecord = env
             .storage()
             .persistent()
-            .get(&DataKey::StreamNFT(nft_id))
-            .ok_or(Error::NFTNotFound)?;
-        Ok(nft.owner)
+            .get(&DataKey::StreamOwnershipRecord(ownership_id))
+            .ok_or(Error::OwnershipRecordNotFound)?;
+        Ok(ownership_record.owner)
     }
 
     pub fn get_claimable(env: Env, stream_id: u64) -> Result<i128, Error> {
@@ -389,19 +406,19 @@ impl PaymentStreamContract {
         Ok(Self::calculate_claimable(&stream, env.ledger().timestamp()))
     }
 
-    fn mint_nft(env: Env, recipient: Address, stream_id: u64) -> u64 {
-        let nft_id: u64 = env
+    fn mint_ownership_record(env: Env, recipient: Address, stream_id: u64) -> u64 {
+        let ownership_id: u64 = env
             .storage()
             .instance()
-            .get(&DataKey::NFTCounter)
+            .get(&DataKey::OwnershipCounter)
             .unwrap_or(0);
-        let new_nft_id = nft_id + 1;
+        let new_ownership_id = ownership_id + 1;
 
         env.storage()
             .instance()
-            .set(&DataKey::NFTCounter, &new_nft_id);
+            .set(&DataKey::OwnershipCounter, &new_ownership_id);
 
-        let nft = StreamNFT {
+        let ownership_record = StreamOwnershipRecord {
             stream_id,
             owner: recipient,
             minted_at: env.ledger().timestamp(),
@@ -409,12 +426,12 @@ impl PaymentStreamContract {
 
         env.storage()
             .persistent()
-            .set(&DataKey::StreamNFT(new_nft_id), &nft);
+            .set(&DataKey::StreamOwnershipRecord(new_ownership_id), &ownership_record);
         env.storage()
             .persistent()
-            .set(&DataKey::NFTToStream(new_nft_id), &stream_id);
+            .set(&DataKey::OwnershipToStream(new_ownership_id), &stream_id);
 
-        new_nft_id
+        new_ownership_id
     }
 
     fn calculate_vested(stream: &Stream, current_time: u64) -> i128 {
