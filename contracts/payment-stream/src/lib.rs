@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, panic_with_error, token, Address, Env, Symbol, log};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, panic_with_error, token, Address, Env, Symbol};
 
 /// Stream status enum
 #[contracttype]
@@ -24,6 +24,14 @@ pub struct Stream {
     pub start_time: u64,
     pub end_time: u64,
     pub status: StreamStatus,
+}
+
+/// Fee collected event data
+#[contracttype]
+#[derive(Clone)]
+pub struct FeeCollectedEvent {
+    pub stream_id: u64,
+    pub amount: i128,
 }
 
 /// Custom errors for the contract
@@ -213,8 +221,8 @@ impl PaymentStreamContract {
         if fee > 0 {
             let fee_collector: Address = env.storage().instance().get(&Symbol::new(&env, "fee_collector")).unwrap();
             token_client.transfer(&env.current_contract_address(), &fee_collector, &fee);
-            // Log FeeCollected event
-            log!(&env, "FeeCollected", stream_id, fee);
+            // Emit FeeCollected event
+            env.events().publish(("FeeCollected", stream_id), fee);
         }
     }
 
