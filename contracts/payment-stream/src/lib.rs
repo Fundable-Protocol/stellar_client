@@ -154,10 +154,8 @@ impl PaymentStreamContract {
 
         // fee = (amount * fee_rate) / 10000
         // To avoid overflow, use checked operations
-        let amount_u128 = amount as u128;
-        let fee_rate_u128 = fee_rate as u128;
-        let fee = ((amount_u128 * fee_rate_u128) / 10000) as i128;
-        fee
+        let fee = (amount / 10000) * (fee_rate as i128);
+        fee.max(0)
     }
 
 
