@@ -55,3 +55,6 @@ Cargo.lock
 
 # Misc
 .cursor/
+
+# Local issue tracking / scratch notes
+issues/
