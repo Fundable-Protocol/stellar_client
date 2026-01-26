@@ -22,9 +22,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
+            contracts/target
           key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-
       - name: Build contracts
         working-directory: contracts
         run: cargo build --release
