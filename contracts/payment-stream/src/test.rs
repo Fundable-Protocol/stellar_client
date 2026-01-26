@@ -465,4 +465,126 @@ fn test_pause_and_resume_stream() {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn test_deposit_multiple() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract, ());
+        let client = PaymentStreamContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &fee_collector, &0);
+
+        let token_admin = token::StellarAssetClient::new(&env, &token);
+        token_admin.mint(&sender, &1000);
+
+        let stream_id = client.create_stream(
+            &sender,
+            &recipient,
+            &token,
+            &1000,
+            &0,
+            &0,
+            &100,
+        );
+
+        // First deposit
+        client.deposit(&stream_id, &300);
+        let stream = client.get_stream(&stream_id);
+        assert_eq!(stream.balance, 300);
+
+        // Second deposit
+        client.deposit(&stream_id, &200);
+        let stream = client.get_stream(&stream_id);
+        assert_eq!(stream.balance, 500);
+    }
+
+    #[test]
+    fn test_deposit_after_withdrawal() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract, ());
+        let client = PaymentStreamContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &fee_collector, &0);
+
+        let token_admin = token::StellarAssetClient::new(&env, &token);
+        token_admin.mint(&sender, &1000);
+
+        let stream_id = client.create_stream(
+            &sender,
+            &recipient,
+            &token,
+            &1000,
+            &500,
+            &0,
+            &100,
+        );
+
+        env.ledger().set_timestamp(50);
+        let available = client.withdrawable_amount(&stream_id);
+        client.withdraw(&stream_id, &available);
+
+        let stream = client.get_stream(&stream_id);
+        assert_eq!(stream.withdrawn_amount, available);
+
+        // Deposit more
+        client.deposit(&stream_id, &100);
+        let stream = client.get_stream(&stream_id);
+        assert_eq!(stream.balance, 500 + 100);
+    }
+
+    #[test]
+    fn test_deposit_negative_amount() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract, ());
+        let client = PaymentStreamContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &fee_collector, &0);
+
+        let token_admin = token::StellarAssetClient::new(&env, &token);
+        token_admin.mint(&sender, &1000);
+
+        let stream_id = client.create_stream(
+            &sender,
+            &recipient,
+            &token,
+            &1000,
+            &0,
+            &0,
+            &100,
+        );
+
+        // Try to deposit negative amount
+        let result = client.try_deposit(&stream_id, &-100);
+        assert!(result.is_err());
+    }
+
 }

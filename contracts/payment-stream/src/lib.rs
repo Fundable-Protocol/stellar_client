@@ -62,6 +62,7 @@ pub enum Error {
     FeeTooHigh = 12,
     InvalidRecipient = 13,
     DepositExceedsTotal = 14,
+    ArithmeticOverflow = 15,
 }
 
 // consts defined above
@@ -153,12 +154,20 @@ impl PaymentStreamContract {
     pub fn deposit(env: Env, stream_id: u64, amount: i128) {
         let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
 
+        if matches!(stream.status, StreamStatus::Canceled | StreamStatus::Completed) {
+            panic_with_error!(&env, Error::StreamNotActive);
+        }
+
         stream.sender.require_auth();
 
         if amount <= 0 {
             panic_with_error!(&env, Error::InvalidAmount);
         }
-        if stream.balance + amount > stream.total_amount {
+
+        let new_balance = stream.balance.checked_add(amount)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::ArithmeticOverflow));
+
+        if new_balance > stream.total_amount {
             panic_with_error!(&env, Error::DepositExceedsTotal);
         }
 
@@ -167,7 +176,7 @@ impl PaymentStreamContract {
         token_client.transfer(&stream.sender, &env.current_contract_address(), &amount);
 
         // Update balance
-        stream.balance += amount;
+        stream.balance = new_balance;
 
         env.storage().persistent().set(&stream_id, &stream);
         env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
@@ -325,7 +334,7 @@ impl PaymentStreamContract {
         env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
 
         // Refund remaining tokens to sender
-        let remaining = stream.total_amount - stream.withdrawn_amount;
+        let remaining = (stream.balance - stream.withdrawn_amount).max(0);
         if remaining > 0 {
             let token_client = token::Client::new(&env, &stream.token);
             token_client.transfer(&env.current_contract_address(), &stream.sender, &remaining);
