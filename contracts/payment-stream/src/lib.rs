@@ -43,6 +43,23 @@ pub struct StreamDepositEvent {
     pub amount: i128,
 }
 
+/// Delegation granted event data
+#[contracttype]
+#[derive(Clone)]
+pub struct DelegationGrantedEvent {
+    pub stream_id: u64,
+    pub recipient: Address,
+    pub delegate: Address,
+}
+
+/// Delegation revoked event data
+#[contracttype]
+#[derive(Clone)]
+pub struct DelegationRevokedEvent {
+    pub stream_id: u64,
+    pub recipient: Address,
+}
+
 /// Custom errors for the contract
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -63,6 +80,7 @@ pub enum Error {
     InvalidRecipient = 13,
     DepositExceedsTotal = 14,
     ArithmeticOverflow = 15,
+    InvalidDelegate = 16,
 }
 
 // consts defined above
@@ -196,6 +214,85 @@ impl PaymentStreamContract {
         }
     }
 
+    /// Assert that the caller is authorized to withdraw (recipient or delegate).
+    fn assert_is_recipient_or_delegate(env: &Env, stream_id: u64) {
+        let stream: Stream = Self::get_stream(env.clone(), stream_id);
+        
+        // First, check if a delegate is set and try to require auth from them
+        let delegate_opt: Option<Address> = env.storage().persistent().get(&(stream_id, Symbol::new(env, "delegate")));
+        
+        if let Some(delegate) = delegate_opt {
+            // If delegate exists, require auth from delegate (they're the one calling)
+            delegate.require_auth();
+        } else {
+            // No delegate, require auth from recipient
+            stream.recipient.require_auth();
+        }
+    }
+
+    /// Set a delegate for withdrawal rights on a stream
+    pub fn set_delegate(env: Env, stream_id: u64, delegate: Address) {
+        let stream: Stream = Self::get_stream(env.clone(), stream_id);
+        stream.recipient.require_auth();
+    
+        // Prevent self-delegation
+        if delegate == stream.recipient {
+            panic_with_error!(&env, Error::InvalidDelegate);
+        }
+
+        // Check if there's an existing delegate and emit revocation event
+        let delegate_key = (stream_id, Symbol::new(&env, "delegate"));
+        if let Some(old_delegate) = env.storage().persistent().get::<_, Address>(&delegate_key) {
+            if old_delegate != delegate {
+                let revoke_event = DelegationRevokedEvent {
+                    stream_id,
+                    recipient: stream.recipient.clone(),
+                };
+                env.events().publish(("DelegationRevoked", stream_id), revoke_event);
+            }
+        }
+    
+        // Store delegate
+        env.storage().persistent().set(&(stream_id, Symbol::new(&env, "delegate")), &delegate);
+        env.storage().persistent().extend_ttl(&(stream_id, Symbol::new(&env, "delegate")), LEDGER_THRESHOLD, LEDGER_BUMP);
+    
+        // Emit event
+        let event = DelegationGrantedEvent {
+            stream_id,
+            recipient: stream.recipient,
+            delegate: delegate.clone(),
+        };
+        env.events().publish(("DelegationGranted", stream_id), event);
+    }
+
+    /// Revoke the delegate for a stream
+    pub fn revoke_delegate(env: Env, stream_id: u64) {
+        let stream: Stream = Self::get_stream(env.clone(), stream_id);
+        stream.recipient.require_auth();
+
+        let delegate_key = (stream_id, Symbol::new(&env, "delegate"));
+        let had_delegate = env.storage().persistent().has(&delegate_key);
+
+        // Remove delegate
+        env.storage().persistent().remove(&delegate_key);
+
+        // Only emit event if delegate was actually set
+        if had_delegate {
+            let event = DelegationRevokedEvent {
+                stream_id,
+                recipient: stream.recipient,
+            };
+            env.events().publish(("DelegationRevoked", stream_id), event);
+        }
+    }
+
+    /// Get the delegate for a stream
+    pub fn get_delegate(env: Env, stream_id: u64) -> Option<Address> {
+        // Ensure stream exists
+        Self::get_stream(env.clone(), stream_id);
+        env.storage().persistent().get(&(stream_id, Symbol::new(&env, "delegate")))
+    }
+
     /// Calculate the protocol fee for a given amount
     fn calculate_protocol_fee(env: &Env, amount: i128) -> i128 {
         let fee_rate: u32 = env.storage().instance().get(&Symbol::new(env, "general_protocol_fee_rate")).unwrap_or(0);
@@ -246,7 +343,7 @@ impl PaymentStreamContract {
     pub fn withdraw(env: Env, stream_id: u64, amount: i128) {
         let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
 
-        stream.recipient.require_auth();
+        Self::assert_is_recipient_or_delegate(&env, stream_id);
 
         let available = Self::withdrawable_amount(env.clone(), stream_id);
         if amount > available || amount <= 0 {
