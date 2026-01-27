@@ -20,6 +20,7 @@ pub struct Stream {
     pub recipient: Address,
     pub token: Address,
     pub total_amount: i128,
+    pub balance: i128,
     pub withdrawn_amount: i128,
     pub start_time: u64,
     pub end_time: u64,
@@ -30,6 +31,14 @@ pub struct Stream {
 #[contracttype]
 #[derive(Clone)]
 pub struct FeeCollectedEvent {
+    pub stream_id: u64,
+    pub amount: i128,
+}
+
+/// Stream deposit event data
+#[contracttype]
+#[derive(Clone)]
+pub struct StreamDepositEvent {
     pub stream_id: u64,
     pub amount: i128,
 }
@@ -52,6 +61,8 @@ pub enum Error {
     TransferFailed = 11,
     FeeTooHigh = 12,
     InvalidRecipient = 13,
+    DepositExceedsTotal = 14,
+    ArithmeticOverflow = 15,
 }
 
 // consts defined above
@@ -88,6 +99,7 @@ impl PaymentStreamContract {
         recipient: Address,
         token: Address,
         total_amount: i128,
+        initial_amount: i128,
         start_time: u64,
         end_time: u64,
     ) -> u64 {
@@ -95,6 +107,9 @@ impl PaymentStreamContract {
 
         // Validate inputs
         if total_amount <= 0 {
+            panic_with_error!(&env, Error::InvalidAmount);
+        }
+        if initial_amount < 0 || initial_amount > total_amount {
             panic_with_error!(&env, Error::InvalidAmount);
         }
         if end_time <= start_time {
@@ -115,6 +130,7 @@ impl PaymentStreamContract {
             recipient: recipient.clone(),
             token: token.clone(),
             total_amount,
+            balance: initial_amount,
             withdrawn_amount: 0,
             start_time,
             end_time,
@@ -126,12 +142,48 @@ impl PaymentStreamContract {
         env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
 
         // Transfer tokens from sender to contract (escrow)
-        let token_client = token::Client::new(&env, &token);
-        token_client.transfer(&sender, &env.current_contract_address(), &total_amount);
+        if initial_amount > 0 {
+            let token_client = token::Client::new(&env, &token);
+            token_client.transfer(&sender, &env.current_contract_address(), &initial_amount);
+        }
 
         stream_id
     }
 
+    /// Deposit tokens to an existing stream
+    pub fn deposit(env: Env, stream_id: u64, amount: i128) {
+        let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
+
+        if matches!(stream.status, StreamStatus::Canceled | StreamStatus::Completed) {
+            panic_with_error!(&env, Error::StreamNotActive);
+        }
+
+        stream.sender.require_auth();
+
+        if amount <= 0 {
+            panic_with_error!(&env, Error::InvalidAmount);
+        }
+
+        let new_balance = stream.balance.checked_add(amount)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::ArithmeticOverflow));
+
+        if new_balance > stream.total_amount {
+            panic_with_error!(&env, Error::DepositExceedsTotal);
+        }
+
+        // Transfer tokens from sender to contract
+        let token_client = token::Client::new(&env, &stream.token);
+        token_client.transfer(&stream.sender, &env.current_contract_address(), &amount);
+
+        // Update balance
+        stream.balance = new_balance;
+
+        env.storage().persistent().set(&stream_id, &stream);
+        env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        // Emit StreamDeposit event
+        env.events().publish(("StreamDeposit", stream_id), StreamDepositEvent { stream_id, amount });
+    }
 
     /// Get stream details (moved up for visibility)
     pub fn get_stream(env: Env, stream_id: u64) -> Stream {
@@ -184,7 +236,10 @@ impl PaymentStreamContract {
         let duration = stream.end_time - stream.start_time;
         let vested = (stream.total_amount * elapsed as i128) / duration as i128;
 
-        vested - stream.withdrawn_amount
+        let available_balance = stream.balance - stream.withdrawn_amount;
+        let withdrawable = vested - stream.withdrawn_amount;
+
+        withdrawable.min(available_balance).max(0)
     }
 
     /// Withdraw from a stream
@@ -279,7 +334,7 @@ impl PaymentStreamContract {
         env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
 
         // Refund remaining tokens to sender
-        let remaining = stream.total_amount - stream.withdrawn_amount;
+        let remaining = (stream.balance - stream.withdrawn_amount).max(0);
         if remaining > 0 {
             let token_client = token::Client::new(&env, &stream.token);
             token_client.transfer(&env.current_contract_address(), &stream.sender, &remaining);
