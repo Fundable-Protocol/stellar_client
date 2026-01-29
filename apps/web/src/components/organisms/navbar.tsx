@@ -17,10 +17,16 @@ export function Navbar() {
           {/* Desktop Nav */}
 
           <Link
-            href="#"
+            href="/"
             className="text-white transition-colors uppercase border-b-2 border-white pb-1"
           >
             Home
+          </Link>
+          <Link
+            href="/balances"
+            className="hover:text-white transition-colors uppercase pb-1 border-b-2 border-transparent hover:border-white/50"
+          >
+            Balances
           </Link>
           <Link
             href="#"
