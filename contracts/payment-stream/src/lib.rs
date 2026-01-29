@@ -25,6 +25,8 @@ pub struct Stream {
     pub start_time: u64,
     pub end_time: u64,
     pub status: StreamStatus,
+    pub paused_at: Option<u64>,  
+    pub total_paused_duration: u64,
 }
 
 /// Fee collected event data
@@ -58,6 +60,23 @@ pub struct DelegationGrantedEvent {
 pub struct DelegationRevokedEvent {
     pub stream_id: u64,
     pub recipient: Address,
+}
+
+// Stream paused event
+#[contracttype]
+#[derive(Clone)]
+pub struct StreamPausedEvent {
+    pub stream_id: u64,
+    pub paused_at: u64,
+}
+
+// Stream resumed event
+#[contracttype]
+#[derive(Clone)]
+pub struct StreamResumedEvent {
+    pub stream_id: u64,
+    pub resumed_at: u64,
+    pub paused_duration: u64,
 }
 
 /// Custom errors for the contract
@@ -153,6 +172,8 @@ impl PaymentStreamContract {
             start_time,
             end_time,
             status: StreamStatus::Active,
+            paused_at: None,  
+        total_paused_duration: 0,  
         };
 
         // Store stream and extend TTL
@@ -310,34 +331,44 @@ impl PaymentStreamContract {
 
 
     /// Calculate withdrawable amount for a stream
-    pub fn withdrawable_amount(env: Env, stream_id: u64) -> i128 {
-        let stream: Stream = Self::get_stream(env.clone(), stream_id);
+  pub fn withdrawable_amount(env: Env, stream_id: u64) -> i128 {
+    let stream: Stream = Self::get_stream(env.clone(), stream_id);
 
-
-        if stream.status != StreamStatus::Active {
-            return 0;
-        }
-
-        let current_time = env.ledger().timestamp();
-
-        if current_time <= stream.start_time {
-            return 0;
-        }
-
-        let elapsed = if current_time >= stream.end_time {
-            stream.end_time - stream.start_time
-        } else {
-            current_time - stream.start_time
-        };
-
-        let duration = stream.end_time - stream.start_time;
-        let vested = (stream.total_amount * elapsed as i128) / duration as i128;
-
-        let available_balance = stream.balance - stream.withdrawn_amount;
-        let withdrawable = vested - stream.withdrawn_amount;
-
-        withdrawable.min(available_balance).max(0)
+    // Paused streams have no withdrawable amount
+    if stream.status == StreamStatus::Paused {
+        return 0;
     }
+
+    // Only active streams can have withdrawable amounts
+    if stream.status != StreamStatus::Active {
+        return 0;
+    }
+
+    let current_time = env.ledger().timestamp();
+
+    if current_time <= stream.start_time {
+        return 0;
+    }
+
+    // Calculate effective elapsed time (excluding paused duration)
+    let raw_elapsed = if current_time >= stream.end_time {
+        stream.end_time - stream.start_time
+    } else {
+        current_time - stream.start_time
+    };
+
+    // Subtract the total paused duration from elapsed time
+    let elapsed = raw_elapsed.saturating_sub(stream.total_paused_duration);
+
+    let duration = (stream.end_time - stream.start_time).saturating_sub(stream.total_paused_duration);
+    if duration == 0 {
+        return 0;
+    }
+
+    let vested = (stream.total_amount * elapsed as i128) / duration as i128;
+
+    vested - stream.withdrawn_amount
+}
 
     /// Withdraw from a stream
     pub fn withdraw(env: Env, stream_id: u64, amount: i128) {
@@ -387,36 +418,76 @@ impl PaymentStreamContract {
     }
 
     /// Pause a stream (sender only)
-    pub fn pause_stream(env: Env, stream_id: u64) {
-      let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
+  pub fn pause_stream(env: Env, stream_id: u64) {
+    let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
 
-        stream.sender.require_auth();
+    stream.sender.require_auth();
 
-        if stream.status != StreamStatus::Active {
-            panic_with_error!(&env, Error::StreamNotActive);
-        }
-        stream.status = StreamStatus::Paused;
-
-        env.storage().persistent().set(&stream_id, &stream);
-        env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
+    if stream.status != StreamStatus::Active {
+        panic_with_error!(&env, Error::StreamNotActive);
     }
+
+    let current_time = env.ledger().timestamp();
+    
+    stream.status = StreamStatus::Paused;
+    stream.paused_at = Some(current_time);
+
+    env.storage().persistent().set(&stream_id, &stream);
+    env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
+
+    // Emit StreamPaused event
+    env.events().publish(
+        ("StreamPaused", stream_id),
+        StreamPausedEvent {
+            stream_id,
+            paused_at: current_time,
+        },
+    );
+}
 
     /// Resume a paused stream (sender only)
-    pub fn resume_stream(env: Env, stream_id: u64) {
-        let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
+   pub fn resume_stream(env: Env, stream_id: u64) {
+    let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
 
-        stream.sender.require_auth();
+    stream.sender.require_auth();
 
-        if stream.status != StreamStatus::Paused {
-            panic_with_error!(&env, Error::StreamNotPaused);
-        }
-        stream.status = StreamStatus::Active;
-
-        env.storage().persistent().set(&stream_id, &stream);
-        env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
+    if stream.status != StreamStatus::Paused {
+        panic_with_error!(&env, Error::StreamNotPaused);
     }
 
-    /// Cancel a stream (sender only)
+    let current_time = env.ledger().timestamp();
+    
+    // Calculate pause duration
+    let paused_duration = if let Some(paused_at) = stream.paused_at {
+        current_time.saturating_sub(paused_at)
+    } else {
+        0
+    };
+
+    // Update total paused duration
+    stream.total_paused_duration += paused_duration;
+    
+    // Extend end_time by the paused duration
+    stream.end_time += paused_duration;
+    
+    stream.status = StreamStatus::Active;
+    stream.paused_at = None;
+
+    env.storage().persistent().set(&stream_id, &stream);
+    env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
+
+    // Emit StreamResumed event
+    env.events().publish(
+        ("StreamResumed", stream_id),
+        StreamResumedEvent {
+            stream_id,
+            resumed_at: current_time,
+            paused_duration,
+        },
+    );
+}
+
+    
     pub fn cancel_stream(env: Env, stream_id: u64) {
       let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
 
@@ -438,7 +509,7 @@ impl PaymentStreamContract {
         }
     }
 
-    /// Set the protocol fee rate (admin only)
+    
     pub fn set_protocol_fee_rate(env: Env, new_fee_rate: u32) {
         let admin: Address = env.storage().instance().get(&Symbol::new(&env, "admin")).unwrap();
         admin.require_auth();
@@ -451,7 +522,6 @@ impl PaymentStreamContract {
         env.storage().instance().extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
     }
 
-    /// Set the fee collector address (admin only)
     pub fn set_fee_collector(env: Env, new_fee_collector: Address) {
         let admin: Address = env.storage().instance().get(&Symbol::new(&env, "admin")).unwrap();
         admin.require_auth();
