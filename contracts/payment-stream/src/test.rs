@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod test {
+    use super::*;
     use soroban_sdk::testutils::{Address as _, Events, Ledger, MockAuth, MockAuthInvoke};
     use soroban_sdk::{token, Address, Env, IntoVal};
     use crate::{PaymentStreamContract, PaymentStreamContractClient, StreamStatus};
@@ -1262,4 +1263,425 @@ fn test_stream_resumed_event_emitted() {
 }
 
 
+ #[test]
+    fn test_protocol_metrics_initialization() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
+
+        let contract_id = env.register(PaymentStreamContract, ());
+        let client = PaymentStreamContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &fee_collector, &100);
+
+        // Verify protocol metrics are initialized
+        let metrics = client.get_protocol_metrics();
+        
+        assert_eq!(metrics.total_active_streams, 0);
+        assert_eq!(metrics.total_tokens_streamed, 0);
+        assert_eq!(metrics.total_streams_created, 0);
+        assert_eq!(metrics.total_delegations, 0);
+    }
+
+
+#[test]
+    fn test_withdrawal_updates_metrics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract, ());
+        let client = PaymentStreamContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &fee_collector, &0);
+
+        let token_admin = token::StellarAssetClient::new(&env, &token);
+        token_admin.mint(&sender, &1000);
+
+        let stream_id = client.create_stream(
+            &sender,
+            &recipient,
+            &token,
+            &1000,
+            &1000,
+            &0,
+            &100,
+        );
+
+        // Get initial metrics
+        let initial_metrics = client.get_stream_metrics(&stream_id);
+        let initial_activity = initial_metrics.last_activity;
+
+        // Advance time to make some amount withdrawable
+        env.ledger().set_timestamp(50);
+
+        // Withdraw
+        let withdrawable = client.withdrawable_amount(&stream_id);
+        client.withdraw(&stream_id, &withdrawable);
+
+        // Check metrics updated
+        let stream_metrics = client.get_stream_metrics(&stream_id);
+        
+        assert_eq!(stream_metrics.total_withdrawn, withdrawable);
+        assert_eq!(stream_metrics.withdrawal_count, 1);
+        assert!(stream_metrics.last_activity > initial_activity);
+    }
+
+    #[test]
+    fn test_withdraw_max_updates_metrics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract, ());
+        let client = PaymentStreamContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &fee_collector, &0);
+
+        let token_admin = token::StellarAssetClient::new(&env, &token);
+        token_admin.mint(&sender, &1000);
+
+        let stream_id = client.create_stream(
+            &sender,
+            &recipient,
+            &token,
+            &1000,
+            &1000,
+            &0,
+            &100,
+        );
+
+        env.ledger().set_timestamp(50);
+
+        let withdrawable = client.withdrawable_amount(&stream_id);
+        client.withdraw_max(&stream_id);
+
+        // Check metrics
+        let stream_metrics = client.get_stream_metrics(&stream_id);
+        
+        assert_eq!(stream_metrics.total_withdrawn, withdrawable);
+        assert_eq!(stream_metrics.withdrawal_count, 1);
+    }
+
+
+    #[test]
+    fn test_multiple_withdrawals_accumulate_metrics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract, ());
+        let client = PaymentStreamContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &fee_collector, &0);
+
+        let token_admin = token::StellarAssetClient::new(&env, &token);
+        token_admin.mint(&sender, &1000);
+
+        let stream_id = client.create_stream(
+            &sender,
+            &recipient,
+            &token,
+            &1000,
+            &1000,
+            &0,
+            &100,
+        );
+
+        // First withdrawal
+        env.ledger().set_timestamp(25);
+        client.withdraw(&stream_id, &100);
+
+        let metrics_after_first = client.get_stream_metrics(&stream_id);
+        assert_eq!(metrics_after_first.total_withdrawn, 100);
+        assert_eq!(metrics_after_first.withdrawal_count, 1);
+
+        // Second withdrawal
+        env.ledger().set_timestamp(50);
+        client.withdraw(&stream_id, &200);
+
+        let metrics_after_second = client.get_stream_metrics(&stream_id);
+        assert_eq!(metrics_after_second.total_withdrawn, 300);
+        assert_eq!(metrics_after_second.withdrawal_count, 2);
+
+        // Third withdrawal
+        env.ledger().set_timestamp(75);
+        client.withdraw(&stream_id, &150);
+
+        let metrics_after_third = client.get_stream_metrics(&stream_id);
+        assert_eq!(metrics_after_third.total_withdrawn, 450);
+        assert_eq!(metrics_after_third.withdrawal_count, 3);
+    }
+
+    #[test]
+    fn test_pause_updates_metrics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract, ());
+        let client = PaymentStreamContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &fee_collector, &0);
+
+        let token_admin = token::StellarAssetClient::new(&env, &token);
+        token_admin.mint(&sender, &1000);
+
+        let stream_id = client.create_stream(
+            &sender,
+            &recipient,
+            &token,
+            &1000,
+            &1000,
+            &0,
+            &100,
+        );
+
+        // Initial metrics
+        let initial_metrics = client.get_stream_metrics(&stream_id);
+        assert_eq!(initial_metrics.pause_count, 0);
+
+        // Pause stream
+        client.pause_stream(&stream_id);
+
+        // Check metrics
+        let stream_metrics = client.get_stream_metrics(&stream_id);
+        assert_eq!(stream_metrics.pause_count, 1);
+
+        // Check protocol metrics
+        let protocol_metrics = client.get_protocol_metrics();
+        assert_eq!(protocol_metrics.total_active_streams, 0);
+    }
+
+    #[test]
+    fn test_resume_updates_metrics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract, ());
+        let client = PaymentStreamContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &fee_collector, &0);
+
+        let token_admin = token::StellarAssetClient::new(&env, &token);
+        token_admin.mint(&sender, &1000);
+
+        let stream_id = client.create_stream(
+            &sender,
+            &recipient,
+            &token,
+            &1000,
+            &1000,
+            &0,
+            &100,
+        );
+
+        // Pause and resume
+        client.pause_stream(&stream_id);
+        
+        let paused_activity = client.get_stream_metrics(&stream_id).last_activity;
+        
+        env.ledger().set_timestamp(10);
+        client.resume_stream(&stream_id);
+
+        // Check metrics updated
+        let stream_metrics = client.get_stream_metrics(&stream_id);
+        assert!(stream_metrics.last_activity > paused_activity);
+
+        // Check active streams incremented back
+        let protocol_metrics = client.get_protocol_metrics();
+        assert_eq!(protocol_metrics.total_active_streams, 1);
+    }
+
+#[test]
+    fn test_revoke_delegate_updates_metrics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract, ());
+        let client = PaymentStreamContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &fee_collector, &0);
+
+        let token_admin = token::StellarAssetClient::new(&env, &token);
+        token_admin.mint(&sender, &1000);
+
+        let stream_id = client.create_stream(
+            &sender,
+            &recipient,
+            &token,
+            &1000,
+            &1000,
+            &0,
+            &100,
+        );
+
+        // Set delegate
+        client.set_delegate(&stream_id, &delegate);
+
+        // Revoke delegate
+        client.revoke_delegate(&stream_id);
+
+        // Check metrics
+        let stream_metrics = client.get_stream_metrics(&stream_id);
+        assert!(stream_metrics.current_delegate.is_none());
+        assert_eq!(stream_metrics.total_delegations, 1); // Count doesn't decrease
+    }
+
+
+    #[test]
+    fn test_deposit_updates_last_activity() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract, ());
+        let client = PaymentStreamContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &fee_collector, &0);
+
+        let token_admin = token::StellarAssetClient::new(&env, &token);
+        token_admin.mint(&sender, &1000);
+
+        let stream_id = client.create_stream(
+            &sender,
+            &recipient,
+            &token,
+            &1000,
+            &100,
+            &0,
+            &100,
+        );
+
+        let initial_metrics = client.get_stream_metrics(&stream_id);
+        let initial_time = initial_metrics.last_activity;
+
+        // Advance time
+        env.ledger().set_timestamp(10);
+
+        // Deposit more
+        client.deposit(&stream_id, &100);
+
+        let updated_metrics = client.get_stream_metrics(&stream_id);
+        assert!(updated_metrics.last_activity >= initial_time);
+    }
+
+    #[test]
+    fn test_multiple_streams_metrics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_collector = Address::generate(&env);
+        let sender = Address::generate(&env);
+
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = sac.address();
+
+        let contract_id = env.register(PaymentStreamContract, ());
+        let client = PaymentStreamContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &fee_collector, &0);
+
+        let token_admin = token::StellarAssetClient::new(&env, &token);
+        token_admin.mint(&sender, &6000);
+
+        // Create multiple streams
+        let recipient1 = Address::generate(&env);
+        let recipient2 = Address::generate(&env);
+        let recipient3 = Address::generate(&env);
+
+        let _stream_id1 = client.create_stream(
+            &sender,
+            &recipient1,
+            &token,
+            &1000,
+            &1000,
+            &0,
+            &100,
+        );
+
+        let _stream_id2 = client.create_stream(
+            &sender,
+            &recipient2,
+            &token,
+            &2000,
+            &2000,
+            &0,
+            &100,
+        );
+
+        let _stream_id3 = client.create_stream(
+            &sender,
+            &recipient3,
+            &token,
+            &3000,
+            &3000,
+            &0,
+            &100,
+        );
+
+        // Check protocol metrics
+        let protocol_metrics = client.get_protocol_metrics();
+        
+        assert_eq!(protocol_metrics.total_active_streams, 3);
+        assert_eq!(protocol_metrics.total_tokens_streamed, 6000);
+        assert_eq!(protocol_metrics.total_streams_created, 3);
+    }
+
+    
 }

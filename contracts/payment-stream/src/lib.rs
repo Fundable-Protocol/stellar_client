@@ -29,6 +29,29 @@ pub struct Stream {
     pub total_paused_duration: u64,
 }
 
+/// Per-stream metrics tracking
+#[contracttype]
+#[derive(Clone)]
+pub struct StreamMetrics {
+    pub last_activity: u64,           // Timestamp of last stream activity
+    pub total_withdrawn: i128,        // Total amount withdrawn from stream
+    pub withdrawal_count: u32,        // Number of withdrawal operations
+    pub pause_count: u32,             // Number of times stream was paused
+    pub total_delegations: u32,       // Total number of delegation changes
+    pub current_delegate: Option<Address>, // Current delegate (if any)
+    pub last_delegation_time: u64,    // Timestamp of last delegation change
+}
+
+/// Protocol-wide metrics tracking
+#[contracttype]
+#[derive(Clone)]
+pub struct ProtocolMetrics {
+    pub total_active_streams: u64,    // Count of currently active streams
+    pub total_tokens_streamed: i128,  // Total tokens ever streamed
+    pub total_streams_created: u64,   // Total number of streams created
+    pub total_delegations: u64,       // Total number of delegations across all streams
+}
+
 /// Fee collected event data
 #[contracttype]
 #[derive(Clone)]
@@ -102,9 +125,8 @@ pub enum Error {
     InvalidDelegate = 16,
 }
 
-// consts defined above
+// Constants
 const MAX_FEE: u32 = 500; // 5% in basis points
-
 const LEDGER_THRESHOLD: u32 = 518400; // ~30 days at 5s/ledger
 const LEDGER_BUMP: u32 = 535680; // ~31 days
 
@@ -122,10 +144,21 @@ impl PaymentStreamContract {
             panic_with_error!(&env, Error::FeeTooHigh);
         }
         admin.require_auth();
+        
         env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
         env.storage().instance().set(&Symbol::new(&env, "stream_count"), &0u64);
         env.storage().instance().set(&Symbol::new(&env, "fee_collector"), &fee_collector);
         env.storage().instance().set(&Symbol::new(&env, "general_protocol_fee_rate"), &general_fee_rate);
+        
+        // Initialize protocol metrics
+        let initial_metrics = ProtocolMetrics {
+            total_active_streams: 0,
+            total_tokens_streamed: 0,
+            total_streams_created: 0,
+            total_delegations: 0,
+        };
+        env.storage().instance().set(&Symbol::new(&env, "protocol_metrics"), &initial_metrics);
+        
         env.storage().instance().extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
     }
 
@@ -158,7 +191,8 @@ impl PaymentStreamContract {
         let stream_id = stream_count + 1;
         stream_count += 1;
         env.storage().instance().set(&Symbol::new(&env, "stream_count"), &stream_count);
-        env.storage().instance().extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        let current_time = env.ledger().timestamp();
 
         // Create stream
         let stream = Stream {
@@ -172,13 +206,43 @@ impl PaymentStreamContract {
             start_time,
             end_time,
             status: StreamStatus::Active,
-            paused_at: None,  
-        total_paused_duration: 0,  
+            paused_at: None,
+            total_paused_duration: 0,
         };
 
-        // Store stream and extend TTL
+        // Initialize stream metrics
+        let stream_metrics = StreamMetrics {
+            last_activity: current_time,
+            total_withdrawn: 0,
+            withdrawal_count: 0,
+            pause_count: 0,
+            total_delegations: 0,
+            current_delegate: None,
+            last_delegation_time: 0,
+        };
+
+        // Store stream and metrics
         env.storage().persistent().set(&stream_id, &stream);
+        env.storage().persistent().set(&(stream_id, Symbol::new(&env, "metrics")), &stream_metrics);
         env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.storage().persistent().extend_ttl(&(stream_id, Symbol::new(&env, "metrics")), LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        // Update protocol metrics
+        let mut protocol_metrics: ProtocolMetrics = env.storage().instance()
+            .get(&Symbol::new(&env, "protocol_metrics"))
+            .unwrap_or(ProtocolMetrics {
+                total_active_streams: 0,
+                total_tokens_streamed: 0,
+                total_streams_created: 0,
+                total_delegations: 0,
+            });
+
+        protocol_metrics.total_active_streams += 1;
+        protocol_metrics.total_tokens_streamed += total_amount;
+        protocol_metrics.total_streams_created += 1;
+
+        env.storage().instance().set(&Symbol::new(&env, "protocol_metrics"), &protocol_metrics);
+        env.storage().instance().extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
 
         // Transfer tokens from sender to contract (escrow)
         if initial_amount > 0 {
@@ -216,15 +280,24 @@ impl PaymentStreamContract {
 
         // Update balance
         stream.balance = new_balance;
-
         env.storage().persistent().set(&stream_id, &stream);
         env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        // Update stream metrics
+        let mut metrics: StreamMetrics = env.storage().persistent()
+            .get(&(stream_id, Symbol::new(&env, "metrics")))
+            .unwrap_or_else(|| Self::default_stream_metrics(&env));
+
+        metrics.last_activity = env.ledger().timestamp();
+
+        env.storage().persistent().set(&(stream_id, Symbol::new(&env, "metrics")), &metrics);
+        env.storage().persistent().extend_ttl(&(stream_id, Symbol::new(&env, "metrics")), LEDGER_THRESHOLD, LEDGER_BUMP);
 
         // Emit StreamDeposit event
         env.events().publish(("StreamDeposit", stream_id), StreamDepositEvent { stream_id, amount });
     }
 
-    /// Get stream details (moved up for visibility)
+    /// Get stream details
     pub fn get_stream(env: Env, stream_id: u64) -> Stream {
         match env.storage().persistent().get(&stream_id) {
             Some(stream) => {
@@ -232,6 +305,19 @@ impl PaymentStreamContract {
                 stream
             },
             None => panic_with_error!(&env, Error::StreamNotFound),
+        }
+    }
+
+    /// Helper function to create default stream metrics
+    fn default_stream_metrics(env: &Env) -> StreamMetrics {
+        StreamMetrics {
+            last_activity: env.ledger().timestamp(),
+            total_withdrawn: 0,
+            withdrawal_count: 0,
+            pause_count: 0,
+            total_delegations: 0,
+            current_delegate: None,
+            last_delegation_time: 0,
         }
     }
 
@@ -272,11 +358,34 @@ impl PaymentStreamContract {
                 env.events().publish(("DelegationRevoked", stream_id), revoke_event);
             }
         }
-    
+
+        let current_time = env.ledger().timestamp();
+
         // Store delegate
         env.storage().persistent().set(&(stream_id, Symbol::new(&env, "delegate")), &delegate);
         env.storage().persistent().extend_ttl(&(stream_id, Symbol::new(&env, "delegate")), LEDGER_THRESHOLD, LEDGER_BUMP);
-    
+
+        // Update stream metrics
+        let mut metrics: StreamMetrics = env.storage().persistent()
+            .get(&(stream_id, Symbol::new(&env, "metrics")))
+            .unwrap_or_else(|| Self::default_stream_metrics(&env));
+
+        metrics.total_delegations += 1;
+        metrics.current_delegate = Some(delegate.clone());
+        metrics.last_delegation_time = current_time;
+        metrics.last_activity = current_time;
+
+        env.storage().persistent().set(&(stream_id, Symbol::new(&env, "metrics")), &metrics);
+        env.storage().persistent().extend_ttl(&(stream_id, Symbol::new(&env, "metrics")), LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        // Update protocol metrics
+        let mut protocol_metrics: ProtocolMetrics = env.storage().instance()
+            .get(&Symbol::new(&env, "protocol_metrics"))
+            .unwrap();
+        protocol_metrics.total_delegations += 1;
+        env.storage().instance().set(&Symbol::new(&env, "protocol_metrics"), &protocol_metrics);
+        env.storage().instance().extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+
         // Emit event
         let event = DelegationGrantedEvent {
             stream_id,
@@ -297,8 +406,19 @@ impl PaymentStreamContract {
         // Remove delegate
         env.storage().persistent().remove(&delegate_key);
 
-        // Only emit event if delegate was actually set
+        // Update stream metrics
         if had_delegate {
+            let mut metrics: StreamMetrics = env.storage().persistent()
+                .get(&(stream_id, Symbol::new(&env, "metrics")))
+                .unwrap_or_else(|| Self::default_stream_metrics(&env));
+
+            metrics.current_delegate = None;
+            metrics.last_activity = env.ledger().timestamp();
+
+            env.storage().persistent().set(&(stream_id, Symbol::new(&env, "metrics")), &metrics);
+            env.storage().persistent().extend_ttl(&(stream_id, Symbol::new(&env, "metrics")), LEDGER_THRESHOLD, LEDGER_BUMP);
+
+            // Emit event
             let event = DelegationRevokedEvent {
                 stream_id,
                 recipient: stream.recipient,
@@ -329,46 +449,45 @@ impl PaymentStreamContract {
         fee.max(0)
     }
 
-
     /// Calculate withdrawable amount for a stream
-  pub fn withdrawable_amount(env: Env, stream_id: u64) -> i128 {
-    let stream: Stream = Self::get_stream(env.clone(), stream_id);
+    pub fn withdrawable_amount(env: Env, stream_id: u64) -> i128 {
+        let stream: Stream = Self::get_stream(env.clone(), stream_id);
 
-    // Paused streams have no withdrawable amount
-    if stream.status == StreamStatus::Paused {
-        return 0;
+        // Paused streams have no withdrawable amount
+        if stream.status == StreamStatus::Paused {
+            return 0;
+        }
+
+        // Only active streams can have withdrawable amounts
+        if stream.status != StreamStatus::Active {
+            return 0;
+        }
+
+        let current_time = env.ledger().timestamp();
+
+        if current_time <= stream.start_time {
+            return 0;
+        }
+
+        // Calculate effective elapsed time (excluding paused duration)
+        let raw_elapsed = if current_time >= stream.end_time {
+            stream.end_time - stream.start_time
+        } else {
+            current_time - stream.start_time
+        };
+
+        // Subtract the total paused duration from elapsed time
+        let elapsed = raw_elapsed.saturating_sub(stream.total_paused_duration);
+
+        let duration = (stream.end_time - stream.start_time).saturating_sub(stream.total_paused_duration);
+        if duration == 0 {
+            return 0;
+        }
+
+        let vested = (stream.total_amount * elapsed as i128) / duration as i128;
+
+        vested - stream.withdrawn_amount
     }
-
-    // Only active streams can have withdrawable amounts
-    if stream.status != StreamStatus::Active {
-        return 0;
-    }
-
-    let current_time = env.ledger().timestamp();
-
-    if current_time <= stream.start_time {
-        return 0;
-    }
-
-    // Calculate effective elapsed time (excluding paused duration)
-    let raw_elapsed = if current_time >= stream.end_time {
-        stream.end_time - stream.start_time
-    } else {
-        current_time - stream.start_time
-    };
-
-    // Subtract the total paused duration from elapsed time
-    let elapsed = raw_elapsed.saturating_sub(stream.total_paused_duration);
-
-    let duration = (stream.end_time - stream.start_time).saturating_sub(stream.total_paused_duration);
-    if duration == 0 {
-        return 0;
-    }
-
-    let vested = (stream.total_amount * elapsed as i128) / duration as i128;
-
-    vested - stream.withdrawn_amount
-}
 
     /// Withdraw from a stream
     pub fn withdraw(env: Env, stream_id: u64, amount: i128) {
@@ -390,10 +509,29 @@ impl PaymentStreamContract {
         // Check if stream is completed
         if stream.withdrawn_amount >= stream.total_amount {
             stream.status = StreamStatus::Completed;
+            
+            // Update protocol metrics - decrease active streams
+            let mut protocol_metrics: ProtocolMetrics = env.storage().instance()
+                .get(&Symbol::new(&env, "protocol_metrics"))
+                .unwrap();
+            protocol_metrics.total_active_streams = protocol_metrics.total_active_streams.saturating_sub(1);
+            env.storage().instance().set(&Symbol::new(&env, "protocol_metrics"), &protocol_metrics);
         }
 
         env.storage().persistent().set(&stream_id, &stream);
         env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        // Update stream metrics
+        let mut metrics: StreamMetrics = env.storage().persistent()
+            .get(&(stream_id, Symbol::new(&env, "metrics")))
+            .unwrap_or_else(|| Self::default_stream_metrics(&env));
+
+        metrics.total_withdrawn += amount;
+        metrics.withdrawal_count += 1;
+        metrics.last_activity = env.ledger().timestamp();
+
+        env.storage().persistent().set(&(stream_id, Symbol::new(&env, "metrics")), &metrics);
+        env.storage().persistent().extend_ttl(&(stream_id, Symbol::new(&env, "metrics")), LEDGER_THRESHOLD, LEDGER_BUMP);
 
         // Transfer net amount to recipient
         let token_client = token::Client::new(&env, &stream.token);
@@ -403,7 +541,6 @@ impl PaymentStreamContract {
         if fee > 0 {
             let fee_collector: Address = env.storage().instance().get(&Symbol::new(&env, "fee_collector")).unwrap();
             token_client.transfer(&env.current_contract_address(), &fee_collector, &fee);
-            // Emit FeeCollected event
             env.events().publish(("FeeCollected", stream_id), fee);
         }
     }
@@ -418,88 +555,147 @@ impl PaymentStreamContract {
     }
 
     /// Pause a stream (sender only)
-  pub fn pause_stream(env: Env, stream_id: u64) {
-    let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
+    pub fn pause_stream(env: Env, stream_id: u64) {
+        let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
 
-    stream.sender.require_auth();
+        stream.sender.require_auth();
 
-    if stream.status != StreamStatus::Active {
-        panic_with_error!(&env, Error::StreamNotActive);
+        if stream.status != StreamStatus::Active {
+            panic_with_error!(&env, Error::StreamNotActive);
+        }
+
+        let current_time = env.ledger().timestamp();
+        
+        stream.status = StreamStatus::Paused;
+        stream.paused_at = Some(current_time);
+
+        env.storage().persistent().set(&stream_id, &stream);
+        env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        // Update stream metrics
+        let mut metrics: StreamMetrics = env.storage().persistent()
+            .get(&(stream_id, Symbol::new(&env, "metrics")))
+            .unwrap_or_else(|| Self::default_stream_metrics(&env));
+
+        metrics.pause_count += 1;
+        metrics.last_activity = current_time;
+
+        env.storage().persistent().set(&(stream_id, Symbol::new(&env, "metrics")), &metrics);
+        env.storage().persistent().extend_ttl(&(stream_id, Symbol::new(&env, "metrics")), LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        // Update protocol metrics - decrease active streams
+        let mut protocol_metrics: ProtocolMetrics = env.storage().instance()
+            .get(&Symbol::new(&env, "protocol_metrics"))
+            .unwrap();
+        protocol_metrics.total_active_streams = protocol_metrics.total_active_streams.saturating_sub(1);
+        env.storage().instance().set(&Symbol::new(&env, "protocol_metrics"), &protocol_metrics);
+        env.storage().instance().extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        // Emit StreamPaused event
+        env.events().publish(
+            ("StreamPaused", stream_id),
+            StreamPausedEvent {
+                stream_id,
+                paused_at: current_time,
+            },
+        );
     }
-
-    let current_time = env.ledger().timestamp();
-    
-    stream.status = StreamStatus::Paused;
-    stream.paused_at = Some(current_time);
-
-    env.storage().persistent().set(&stream_id, &stream);
-    env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
-
-    // Emit StreamPaused event
-    env.events().publish(
-        ("StreamPaused", stream_id),
-        StreamPausedEvent {
-            stream_id,
-            paused_at: current_time,
-        },
-    );
-}
 
     /// Resume a paused stream (sender only)
-   pub fn resume_stream(env: Env, stream_id: u64) {
-    let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
+    pub fn resume_stream(env: Env, stream_id: u64) {
+        let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
 
-    stream.sender.require_auth();
+        stream.sender.require_auth();
 
-    if stream.status != StreamStatus::Paused {
-        panic_with_error!(&env, Error::StreamNotPaused);
+        if stream.status != StreamStatus::Paused {
+            panic_with_error!(&env, Error::StreamNotPaused);
+        }
+
+        let current_time = env.ledger().timestamp();
+        
+        // Calculate pause duration
+        let paused_duration = if let Some(paused_at) = stream.paused_at {
+            current_time.saturating_sub(paused_at)
+        } else {
+            0
+        };
+
+        // Update total paused duration
+        stream.total_paused_duration += paused_duration;
+        
+        // Extend end_time by the paused duration
+        stream.end_time += paused_duration;
+        
+        stream.status = StreamStatus::Active;
+        stream.paused_at = None;
+
+        env.storage().persistent().set(&stream_id, &stream);
+        env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        // Update stream metrics
+        let mut metrics: StreamMetrics = env.storage().persistent()
+            .get(&(stream_id, Symbol::new(&env, "metrics")))
+            .unwrap_or_else(|| Self::default_stream_metrics(&env));
+
+        metrics.last_activity = current_time;
+
+        env.storage().persistent().set(&(stream_id, Symbol::new(&env, "metrics")), &metrics);
+        env.storage().persistent().extend_ttl(&(stream_id, Symbol::new(&env, "metrics")), LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        // Update protocol metrics - increase active streams
+        let mut protocol_metrics: ProtocolMetrics = env.storage().instance()
+            .get(&Symbol::new(&env, "protocol_metrics"))
+            .unwrap();
+        protocol_metrics.total_active_streams += 1;
+        env.storage().instance().set(&Symbol::new(&env, "protocol_metrics"), &protocol_metrics);
+        env.storage().instance().extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        // Emit StreamResumed event
+        env.events().publish(
+            ("StreamResumed", stream_id),
+            StreamResumedEvent {
+                stream_id,
+                resumed_at: current_time,
+                paused_duration,
+            },
+        );
     }
 
-    let current_time = env.ledger().timestamp();
-    
-    // Calculate pause duration
-    let paused_duration = if let Some(paused_at) = stream.paused_at {
-        current_time.saturating_sub(paused_at)
-    } else {
-        0
-    };
-
-    // Update total paused duration
-    stream.total_paused_duration += paused_duration;
-    
-    // Extend end_time by the paused duration
-    stream.end_time += paused_duration;
-    
-    stream.status = StreamStatus::Active;
-    stream.paused_at = None;
-
-    env.storage().persistent().set(&stream_id, &stream);
-    env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
-
-    // Emit StreamResumed event
-    env.events().publish(
-        ("StreamResumed", stream_id),
-        StreamResumedEvent {
-            stream_id,
-            resumed_at: current_time,
-            paused_duration,
-        },
-    );
-}
-
-    
+    /// Cancel a stream
     pub fn cancel_stream(env: Env, stream_id: u64) {
-      let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
+        let mut stream: Stream = Self::get_stream(env.clone(), stream_id);
 
         stream.sender.require_auth();
 
         if stream.status != StreamStatus::Active && stream.status != StreamStatus::Paused {
             panic_with_error!(&env, Error::StreamCannotBeCanceled);
         }
+        
+        let was_active = stream.status == StreamStatus::Active;
         stream.status = StreamStatus::Canceled;
 
         env.storage().persistent().set(&stream_id, &stream);
         env.storage().persistent().extend_ttl(&stream_id, LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        // Update stream metrics
+        let mut metrics: StreamMetrics = env.storage().persistent()
+            .get(&(stream_id, Symbol::new(&env, "metrics")))
+            .unwrap_or_else(|| Self::default_stream_metrics(&env));
+
+        metrics.last_activity = env.ledger().timestamp();
+
+        env.storage().persistent().set(&(stream_id, Symbol::new(&env, "metrics")), &metrics);
+        env.storage().persistent().extend_ttl(&(stream_id, Symbol::new(&env, "metrics")), LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        // Update protocol metrics - decrease active streams if it was active
+        if was_active {
+            let mut protocol_metrics: ProtocolMetrics = env.storage().instance()
+                .get(&Symbol::new(&env, "protocol_metrics"))
+                .unwrap();
+            protocol_metrics.total_active_streams = protocol_metrics.total_active_streams.saturating_sub(1);
+            env.storage().instance().set(&Symbol::new(&env, "protocol_metrics"), &protocol_metrics);
+            env.storage().instance().extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+        }
 
         // Refund remaining tokens to sender
         let remaining = (stream.balance - stream.withdrawn_amount).max(0);
@@ -509,7 +705,7 @@ impl PaymentStreamContract {
         }
     }
 
-    
+    /// Set the protocol fee rate
     pub fn set_protocol_fee_rate(env: Env, new_fee_rate: u32) {
         let admin: Address = env.storage().instance().get(&Symbol::new(&env, "admin")).unwrap();
         admin.require_auth();
@@ -522,6 +718,7 @@ impl PaymentStreamContract {
         env.storage().instance().extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
     }
 
+    /// Set the fee collector address
     pub fn set_fee_collector(env: Env, new_fee_collector: Address) {
         let admin: Address = env.storage().instance().get(&Symbol::new(&env, "admin")).unwrap();
         admin.require_auth();
@@ -538,6 +735,29 @@ impl PaymentStreamContract {
     /// Get the current fee collector
     pub fn get_fee_collector(env: Env) -> Address {
         env.storage().instance().get(&Symbol::new(&env, "fee_collector")).unwrap()
+    }
+
+    /// Get stream-specific metrics
+    pub fn get_stream_metrics(env: Env, stream_id: u64) -> StreamMetrics {
+        // Ensure stream exists
+        Self::get_stream(env.clone(), stream_id);
+        
+        // Return metrics or default if not found
+        env.storage().persistent()
+            .get(&(stream_id, Symbol::new(&env, "metrics")))
+            .unwrap_or_else(|| Self::default_stream_metrics(&env))
+    }
+
+    /// Get protocol-wide metrics
+    pub fn get_protocol_metrics(env: Env) -> ProtocolMetrics {
+        env.storage().instance()
+            .get(&Symbol::new(&env, "protocol_metrics"))
+            .unwrap_or(ProtocolMetrics {
+                total_active_streams: 0,
+                total_tokens_streamed: 0,
+                total_streams_created: 0,
+                total_delegations: 0,
+            })
     }
 }
 
