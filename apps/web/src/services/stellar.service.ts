@@ -36,6 +36,8 @@ import type {
   AccountBalance,
   StellarServiceConfig,
   StreamStatus,
+  DistributionHistory,
+  HistoryRecord,
 } from './types';
 import {
   StellarError,
@@ -471,6 +473,102 @@ export class StellarService {
       args,
       signerKeypair
     );
+  }
+
+  /**
+   * Get distribution history from the distributor contract
+   * @param startId - Starting history index
+   * @param limit - Number of records to fetch
+   * @returns Array of distribution history records
+   */
+  async getDistributionHistory(startId: bigint, limit: bigint): Promise<(DistributionHistory & { id: string })[]> {
+    try {
+      const result = await this.invokeContractReadOnly<any[]>(
+        this.distributorContractId,
+        'get_distribution_history',
+        [
+          nativeToScVal(startId, { type: 'u64' }),
+          nativeToScVal(limit, { type: 'u64' }),
+        ]
+      );
+
+      return (result || []).map((r: any, index: number) => ({
+        id: (startId + BigInt(index)).toString(),
+        sender: r.sender,
+        token: r.token,
+        amount: BigInt(r.amount),
+        recipients_count: Number(r.recipients_count),
+        timestamp: BigInt(r.timestamp),
+      }));
+    } catch (error) {
+      throw parseError(error);
+    }
+  }
+
+  /**
+   * Get total number of distributions
+   */
+  async getTotalDistributions(): Promise<bigint> {
+    try {
+      const result = await this.invokeContractReadOnly<bigint>(
+        this.distributorContractId,
+        'get_total_distributions',
+        []
+      );
+      return result || 0n;
+    } catch (error) {
+      throw parseError(error);
+    }
+  }
+
+  /**
+   * Get unified transaction history for a user
+   * @param address - User's Stellar address
+   * @returns Array of history records
+   */
+  async getTransactionHistory(address: string): Promise<HistoryRecord[]> {
+    try {
+      // 1. Get streams
+      const streams = await this.getStreams(address);
+      const streamRecords: HistoryRecord[] = streams.map(s => ({
+        id: `stream-${s.id}`,
+        type: 'Stream',
+        date: new Date(Number(s.startTime) * 1000).toISOString(),
+        amount: s.totalAmount,
+        token: s.token,
+        recipients: 1, // Streams are 1-to-1 in current contract
+        status: s.status,
+      }));
+
+      // 2. Get distributions
+      const totalDist = await this.getTotalDistributions();
+      const distributions: DistributionHistory[] = [];
+
+      // Filter distributions by sender (heavy operation if many distributions)
+      // For now, fetch ALL and filter (MVP)
+      // In production, use Horizon events or a specialized indexer
+      if (totalDist > 0n) {
+        const history = await this.getDistributionHistory(0n, totalDist);
+        distributions.push(...history.filter(h => h.sender === address));
+      }
+
+      const distributionRecords: HistoryRecord[] = distributions.map((d, index) => ({
+        id: `dist-${index}`,
+        type: 'Distribution',
+        date: new Date(Number(d.timestamp) * 1000).toISOString(),
+        amount: d.amount,
+        token: d.token,
+        recipients: d.recipients_count,
+        status: 'Completed',
+      }));
+
+      // Combine and sort by date descending
+      return [...streamRecords, ...distributionRecords].sort((a, b) =>
+        new Date(b.date).getTime() - new Date(a.date).getTime()
+      );
+    } catch (error) {
+      throw parseError(error);
+    }
   }
 
   // ============================================
