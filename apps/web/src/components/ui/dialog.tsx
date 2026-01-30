@@ -31,7 +31,7 @@ const DialogContent: React.FC<DialogContentProps> = ({
   children,
   className
 }) => (
-  <div className={cn("relative bg-zinc-900 border border-zinc-800 rounded-lg shadow-lg w-full mx-4 max-h-[90vh] overflow-y-auto p-6", className)}>
+  <div className={cn("relative bg-zinc-900 border border-zinc-800 rounded-lg shadow-lg w-full mx-4 max-h-[90vh] overflow-y-auto p-6 max-w-md", className)}>
     {children}
   </div>
 )
@@ -42,8 +42,8 @@ const DialogHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   </div>
 )
 
-const DialogTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <h2 className="text-lg font-semibold text-zinc-50">{children}</h2>
+const DialogTitle: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className }) => (
+  <h2 className={cn("text-lg font-semibold text-zinc-50", className)}>{children}</h2>
 )
 
 const DialogClose: React.FC<{ onClick: () => void }> = ({ onClick }) => (
