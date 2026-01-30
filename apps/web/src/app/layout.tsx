@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import { Bricolage_Grotesque, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { StellarWalletProvider } from "../providers/StellarWalletProvider";
-import { Navbar } from "./components/navbar";
-import { WalletModal } from "./components/wallet-modal";
+import { Navbar } from "@/components/organisms/navbar";
+import { WalletModal } from "@/components/organisms/wallet-modal";
 import AppProvider from "@/providers/app-provider";
 import { ToastProvider } from "@/providers/ToastProvider";
+import ReactQueryProvider from "@/providers/ReactQueryProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -38,13 +39,15 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${bricolageGrotesque.variable} antialiased`}
       >
-        <StellarWalletProvider>
-          <AppProvider>
-            {/* <Navbar /> */}
-            <main className="">{children}</main>
-            <WalletModal />
-          </AppProvider>
-        </StellarWalletProvider>
+        <ReactQueryProvider>
+          <StellarWalletProvider>
+            <AppProvider>
+              {/* <Navbar /> */}
+              <main className="">{children}</main>
+              <WalletModal />
+            </AppProvider>
+          </StellarWalletProvider>
+        </ReactQueryProvider>
         <ToastProvider />
       </body>
     </html>

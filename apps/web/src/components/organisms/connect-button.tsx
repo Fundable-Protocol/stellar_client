@@ -3,7 +3,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useRef, useEffect } from "react";
 import { LogOut } from "lucide-react";
-import { useWallet } from "../../providers/StellarWalletProvider";
+import { useWallet } from "@/providers/StellarWalletProvider";
 
 const ArrowDownIcon = ({
   className = "text-white/70",
@@ -75,9 +75,8 @@ export function ConnectButton() {
             {formatAddress(address)}
           </span>
           <div
-            className={`transition-transform duration-300 ${
-              dropdownOpen ? "rotate-180" : ""
-            }`}
+            className={`transition-transform duration-300 ${dropdownOpen ? "rotate-180" : ""
+              }`}
           >
             <ArrowDownIcon />
           </div>

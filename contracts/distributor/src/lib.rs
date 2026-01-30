@@ -34,6 +34,9 @@ pub struct DistributionHistory {
 #[contractimpl]
 impl DistributorContract {
     pub fn initialize(env: Env, admin: Address, protocol_fee_percent: u32, fee_address: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Contract already initialized");
+        }
         admin.require_auth();
         
         let storage = env.storage().instance();
@@ -302,6 +305,23 @@ mod test {
 
         let stored_admin = client.get_admin();
         assert_eq!(stored_admin, Some(admin));
+    }
+
+    #[test]
+    #[should_panic(expected = "Contract already initialized")]
+    fn test_re_initialize_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(DistributorContract, ());
+        let client = DistributorContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let fee_address = Address::generate(&env);
+
+        client.initialize(&admin, &250, &fee_address);
+        // This should panic
+        client.initialize(&admin, &250, &fee_address);
     }
 
     #[test]

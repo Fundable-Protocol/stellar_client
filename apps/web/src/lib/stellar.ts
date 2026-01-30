@@ -2,8 +2,8 @@ import { Keypair, Networks, Horizon } from '@stellar/stellar-sdk'
 import { PaymentStreamFormData, SUPPORTED_TOKENS, StreamRecord, WithdrawStreamFormData } from './validations'
 
 // Use testnet for development
-const server = new Horizon.Server('https://horizon-testnet.stellar.org')
-const networkPassphrase = Networks.TESTNET
+export const server = new Horizon.Server('https://horizon-testnet.stellar.org')
+export const networkPassphrase = Networks.TESTNET
 
 export interface CreateStreamParams {
   senderKeypair: Keypair

@@ -22,8 +22,9 @@ import {
   Address,
   nativeToScVal,
   scValToNative,
+  Account,
 } from '@stellar/stellar-sdk';
-import { Server as RpcServer, Api } from '@stellar/stellar-sdk/rpc';
+import { Server as RpcServer, Api, assembleTransaction } from '@stellar/stellar-sdk/rpc';
 import { Horizon } from '@stellar/stellar-sdk';
 import type {
   Stream,
@@ -246,7 +247,7 @@ export class StellarService {
         [nativeToScVal(streamId, { type: 'u64' })]
       );
 
-      return result ? this.parseStreamResult(result) : null;
+      return result ? this.parseStreamResult(result as unknown as Record<string, unknown>) : null;
     } catch (error) {
       if ((error as Error).message?.includes('not found')) {
         throw new StreamNotFoundError(streamId, error as Error);
@@ -486,8 +487,8 @@ export class StellarService {
   ): Promise<T | null> {
     try {
       // Create a simulation request
-      const account = await this.rpcServer.getAccount(contractId);
-      const sourceAccount = new TransactionBuilder.Account(account.accountId, account.sequence);
+      const accountResponse = await this.rpcServer.getAccount(contractId) as any;
+      const sourceAccount = new Account(accountResponse.id || accountResponse.accountId, accountResponse.sequence);
 
       const tx = new TransactionBuilder(sourceAccount, {
         fee: DEFAULT_BASE_FEE,
@@ -581,7 +582,7 @@ export class StellarService {
         }
 
         // Prepare transaction with simulation result
-        const preparedTx = Api.assembleTransaction(tx, simulation).build();
+        const preparedTx = assembleTransaction(tx, simulation).build();
 
         // Sign the transaction
         preparedTx.sign(signerKeypair);
@@ -606,7 +607,7 @@ export class StellarService {
   /**
    * Submit transaction and wait for confirmation
    */
-  private async submitAndWait(tx: TransactionBuilder): Promise<TransactionResult<unknown>> {
+  private async submitAndWait(tx: any): Promise<TransactionResult<unknown>> {
     const sendResponse = await this.rpcServer.sendTransaction(tx);
     const hash = sendResponse.hash;
 
@@ -780,10 +781,10 @@ export class StellarService {
       sender: String(result.sender),
       recipient: String(result.recipient),
       token: String(result.token),
-      totalAmount: BigInt(result.total_amount ?? result.totalAmount ?? 0),
-      withdrawnAmount: BigInt(result.withdrawn_amount ?? result.withdrawnAmount ?? 0),
-      startTime: BigInt(result.start_time ?? result.startTime ?? 0),
-      endTime: BigInt(result.end_time ?? result.endTime ?? 0),
+      totalAmount: BigInt((result.total_amount ?? result.totalAmount ?? 0) as any),
+      withdrawnAmount: BigInt((result.withdrawn_amount ?? result.withdrawnAmount ?? 0) as any),
+      startTime: BigInt((result.start_time ?? result.startTime ?? 0) as any),
+      endTime: BigInt((result.end_time ?? result.endTime ?? 0) as any),
       status: statusMap[String(result.status)] || 'Active',
     };
   }

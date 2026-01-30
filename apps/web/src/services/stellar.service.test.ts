@@ -20,13 +20,13 @@ vi.mock('@stellar/stellar-sdk/rpc', () => ({
   Api: {
     isSimulationError: vi.fn(),
     isSimulationSuccess: vi.fn(),
-    assembleTransaction: vi.fn(),
     GetTransactionStatus: {
       NOT_FOUND: 'NOT_FOUND',
       SUCCESS: 'SUCCESS',
       FAILED: 'FAILED',
     },
   },
+  assembleTransaction: vi.fn(),
 }));
 
 vi.mock('@stellar/stellar-sdk', async () => {

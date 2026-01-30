@@ -2,8 +2,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { Wallet, Check, X } from "lucide-react";
 import React from "react";
-import { useWallet } from "../../providers/StellarWalletProvider";
-import { WalletId } from "../../providers/StellarWalletProvider";
+import { useWallet, WalletId } from "@/providers/StellarWalletProvider";
 
 export function WalletModal() {
   const { isModalOpen, closeModal, supportedWallets, connect, isConnecting } =
@@ -79,19 +78,17 @@ export function WalletModal() {
                     <button
                       key={wallet.id}
                       onClick={() => setActiveSelection(wallet.id)}
-                      className={`group relative flex items-center gap-4 w-full p-4 rounded-2xl transition-all border ${
-                        isSelected
+                      className={`group relative flex items-center gap-4 w-full p-4 rounded-2xl transition-all border ${isSelected
                           ? "bg-white/10 border-white/30 shadow-[0_0_20px_rgba(255,255,255,0.05)]"
                           : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10"
-                      }`}
+                        }`}
                     >
                       {/* Selection indicator */}
                       <div
-                        className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${
-                          isSelected
+                        className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${isSelected
                             ? "border-white bg-white"
                             : "border-white/20 bg-transparent"
-                        }`}
+                          }`}
                       >
                         {isSelected && (
                           <Check
@@ -103,21 +100,18 @@ export function WalletModal() {
 
                       {/* Icon */}
                       <div
-                        className={`p-2 rounded-xl transition-colors ${
-                          isSelected ? "bg-white/20" : "bg-white/5"
-                        }`}
+                        className={`p-2 rounded-xl transition-colors ${isSelected ? "bg-white/20" : "bg-white/5"
+                          }`}
                       >
                         <Wallet
-                          className={`w-5 h-5 ${
-                            isSelected ? "text-white" : "text-[#92A5A8]"
-                          }`}
+                          className={`w-5 h-5 ${isSelected ? "text-white" : "text-[#92A5A8]"
+                            }`}
                         />
                       </div>
 
                       <span
-                        className={`font-semibold text-sm tracking-wide ${
-                          isSelected ? "text-white" : "text-[#92A5A8]"
-                        }`}
+                        className={`font-semibold text-sm tracking-wide ${isSelected ? "text-white" : "text-[#92A5A8]"
+                          }`}
                       >
                         {wallet.name}
                       </span>
@@ -133,11 +127,10 @@ export function WalletModal() {
               <button
                 onClick={handleConnectClick}
                 disabled={!activeSelection || isConnecting}
-                className={`group relative w-full py-4 rounded-2xl font-bold text-sm tracking-widest uppercase transition-all flex items-center justify-center gap-3 overflow-hidden shadow-lg ${
-                  activeSelection
+                className={`group relative w-full py-4 rounded-2xl font-bold text-sm tracking-widest uppercase transition-all flex items-center justify-center gap-3 overflow-hidden shadow-lg ${activeSelection
                     ? "bg-white text-[#0F1621] hover:scale-[1.02] active:scale-[0.98]"
                     : "bg-white/5 text-white/20 cursor-not-allowed"
-                }`}
+                  }`}
               >
                 {isConnecting ? (
                   <div className="w-5 h-5 border-2 border-[#0F1621]/30 border-t-[#0F1621] rounded-full animate-spin" />
