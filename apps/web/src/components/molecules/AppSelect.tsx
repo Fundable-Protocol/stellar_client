@@ -18,6 +18,7 @@ export interface AppSelectProps {
     title?: string;
     options: SelectOption[];
     setValue: (value: string) => void;
+    value?: string;
     className?: string;
     placeholder?: string;
     titleClassName?: string;
@@ -27,12 +28,13 @@ const AppSelect = ({
     title,
     options,
     setValue,
+    value,
     className,
     placeholder,
     titleClassName,
 }: AppSelectProps) => {
     return (
-        <Select onValueChange={setValue}>
+        <Select onValueChange={setValue} value={value}>
             <div className="flex flex-col min-w-max">
                 {!!title && (
                     <h3 className={cn("mb-3 text-nowrap text-zinc-300", titleClassName)}>{title}</h3>

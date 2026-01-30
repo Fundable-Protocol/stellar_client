@@ -63,6 +63,32 @@ export interface DistributeEqualParams {
 }
 
 /**
+ * Distribution history record matching the contract's DistributionHistory
+ */
+export interface DistributionHistory {
+  sender: string;
+  token: string;
+  amount: bigint;
+  recipients_count: number;
+  timestamp: bigint;
+  transaction_hash?: string;
+}
+
+/**
+ * Unified history record for both streams and distributions
+ */
+export interface HistoryRecord {
+  id: string;
+  type: 'Stream' | 'Distribution';
+  date: string;
+  amount: bigint;
+  token: string;
+  recipients: number;
+  status: string;
+  transactionHash?: string;
+}
+
+/**
  * Transaction result with hash and status
  */
 export interface TransactionResult<T = unknown> {
